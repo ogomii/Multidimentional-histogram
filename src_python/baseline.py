@@ -30,22 +30,32 @@ def list_all_colors(image):
     unique_colors = np.unique(image.reshape(-1, image.shape[2]), axis=0)
     print(f"List of all unique colors in the image:\n{unique_colors}")
 
-def calculate_histogram(image, dims, ranges):
+def calculate_histogram(image, dims=None, ranges=None):
     pixels = image.reshape(image.shape[0] * image.shape[1], image.shape[2])
+    counts, bins = np.array([]), []
 
-    if dims is not None:
-        counts, bins = np.histogramdd(pixels, bins=[int(i) for i in dims])
-        print(f"Multidimensional histogram counts shape: {counts.shape}")
-        print(f"Counts of values in bins:\n{counts}")
-        return counts, bins
-    elif ranges is not None:
-        bin_ranges = [[float(i) for i in ranges] for _ in range(image.shape[2])]
-        counts, bins = np.histogramdd(pixels, bins=bin_ranges)
-        print(f"Histogram bin ranges:\n{bins[0]}\n{bins[1]}\n{bins[2]}")
-        print(f"Counts of values in bins:\n{counts}")
-        return counts, bins
-    else:
-        return np.array([]), []
+    try:
+        if dims is not None:
+            # Check if the number of specified dimensions matches the actual number of dimensions
+            if len(dims) == pixels.shape[1]:
+                # Calculate histogram based on dimensions
+                counts, bins = np.histogramdd(pixels, bins=[int(i) for i in dims])
+                print(f"Multidimensional histogram counts (dims) shape: {counts.shape}")
+                print(f"Counts of values in bins (dims):\n{counts}")
+            else:
+                raise ValueError(f"Number of dimensions specified in dims ({len(dims)}) does not match the actual number of dimensions ({pixels.shape[1]})")
+
+        if ranges is not None:
+            # Calculate histogram based on ranges
+            bin_ranges = [[float(i) for i in ranges] for _ in range(pixels.shape[1])]
+            counts, bins = np.histogramdd(pixels, bins=bin_ranges)
+            print(f"Histogram bin ranges:\n{bins[0]}\n{bins[1]}\n{bins[2]}")
+            print(f"Counts of values in bins (ranges):\n{counts}")
+
+    except ValueError as ve:
+        print(f"Error: {ve}")
+
+    return counts, bins
 
 def partial_decomposition(counts, bins, threshold):
     indices = np.where(counts > threshold)
@@ -54,7 +64,7 @@ def partial_decomposition(counts, bins, threshold):
     print(f"Selected bins coordinates:\n{selected_bins}")
 
     selected_counts = counts[indices]
-    remaining_bins = np.delete(bins, indices, axis=0)
+    remaining_bins = [bin_ for bin_ in bins if not np.all(bin_[:3] == selected_bins, axis=1).any()]
 
     print(f"Selected counts:\n{selected_counts}")
     print(f"Remaining bins:\n{remaining_bins}")
