@@ -68,6 +68,31 @@ def partial_decomposition(counts, bins, threshold):
 
     print(f"Selected counts:\n{selected_counts}")
     print(f"Remaining bins:\n{remaining_bins}")
+    return remaining_bins
+
+def partial_reduction(counts, bins, threshold):
+    # Perform partial decomposition
+    remaining_bins = partial_decomposition(counts, bins, threshold)
+
+    # Use boolean indexing to select counts of bins that are not in indices
+    mask = np.ones(counts.shape, dtype=bool)
+
+    for i in range(len(bins)):
+        if isinstance(bins[i][0], (list, np.ndarray)):
+            # Handle the case where bins[i] is a list of arrays
+            mask = mask & ~np.isin(bins[i], remaining_bins).all(axis=-1).any(axis=-1)
+        else:
+            # Handle the case where bins[i] is a single array
+            mask = mask & ~np.isin(bins[i], remaining_bins).any(axis=-1)
+
+    remaining_counts = counts[mask]
+
+    print(f"Remaining counts:\n{remaining_counts}")
+
+    # Perform reduction (sum) on the remaining counts
+    reduced_count = np.sum(remaining_counts)
+
+    print(f"Reduced count: {reduced_count}")
 
 def plot_3d_color_histogram(image):
     pixels = image.reshape(-1, image.shape[2])
@@ -101,6 +126,7 @@ if __name__ == "__main__":
     threshold = 100
 
     counts, bins = calculate_histogram(image, args.dims, args.ranges)
-    partial_decomposition(counts, bins, threshold)
+
+    partial_reduction(counts, bins, threshold)
 
     plot_3d_color_histogram(image)
