@@ -1,4 +1,5 @@
 import cv2
+import sys
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
@@ -7,15 +8,22 @@ from mpl_toolkits.mplot3d import Axes3D
 def parseArguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--image', help='image path', required=True)
+    parser.add_argument('--reduction_type', help='partial reduction type (columns or rows)', required=True)
     parser.add_argument('--dims', help='bins for each dimension', nargs='+', required=False, default=None)
     parser.add_argument('--ranges', help='bin ranges', nargs='+', required=False, default=None)
     return parser.parse_args()
 
 def getImage(imagePath):
-    image = cv2.imread(imagePath)
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    print(f"Image shape: {image.shape}")
-    return image
+    try:
+        image = cv2.imread(imagePath)
+        if image is None:
+            raise Exception("Loading image failed. Please check the image path.")
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        print(f"Image shape: {image.shape}")
+        return image
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 def printExampleRGBValues(image):
     print("3 pixel values from the image in RGB:")
@@ -70,47 +78,72 @@ def partial_decomposition(counts, bins, threshold):
     print(f"Remaining bins:\n{remaining_bins}")
     return remaining_bins
 
-def partial_reduction(counts, bins, threshold):
-    # Perform partial decomposition
-    remaining_bins = partial_decomposition(counts, bins, threshold)
+def partial_reduction(image, reduction_type):
+    if reduction_type == 'columns':
+        counts, bins = np.histogramdd(image.reshape(-1, 3), bins=[image.shape[0], 4, 4])
+        reduced_counts = np.sum(counts, axis=0)
+        print(f"Reduced counts along columns:\n{reduced_counts}")
 
-    # Use boolean indexing to select counts of bins that are not in indices
-    mask = np.ones(counts.shape, dtype=bool)
+    elif reduction_type == 'rows':
+        counts, bins = np.histogramdd(image.reshape(-1, 3), bins=[image.shape[1], 4, 4])
+        reduced_counts = np.sum(counts, axis=1)
+        print(f"Reduced counts along rows:\n{reduced_counts}")
 
-    for i in range(len(bins)):
-        if isinstance(bins[i][0], (list, np.ndarray)):
-            # Handle the case where bins[i] is a list of arrays
-            mask = mask & ~np.isin(bins[i], remaining_bins).all(axis=-1).any(axis=-1)
-        else:
-            # Handle the case where bins[i] is a single array
-            mask = mask & ~np.isin(bins[i], remaining_bins).any(axis=-1)
+    else:
+        print("Invalid reduction type. Please use 'columns' or 'rows'.")
 
-    remaining_counts = counts[mask]
+    return reduced_counts, bins
 
-    print(f"Remaining counts:\n{remaining_counts}")
 
-    # Perform reduction (sum) on the remaining counts
-    reduced_count = np.sum(remaining_counts)
+# def partial_histogram(image, reduction_type):
+#     histograms = []
 
-    print(f"Reduced count: {reduced_count}")
+#     if reduction_type == 'columns':
+#         for col in range(image.shape[1]):
+#             column_pixels = image[:, col, :]
+#             counts, bins = np.histogramdd(column_pixels, bins=[4, 4, 4])
+#             histograms.append((counts, bins))
 
-def plot_3d_color_histogram(image):
-    pixels = image.reshape(-1, image.shape[2])
+#     elif reduction_type == 'rows':
+#         for row in range(image.shape[0]):
+#             row_pixels = image[row, :, :]
+#             counts, bins = np.histogramdd(row_pixels, bins=[4, 4, 4])
+#             histograms.append((counts, bins))
 
-    unique_colors, counts = np.unique(pixels, axis=0, return_counts=True)
+#     else:
+#         print("Invalid reduction type. Please use 'columns' or 'rows'.")
 
-    r_values = unique_colors[:, 0]
-    g_values = unique_colors[:, 1]
-    b_values = unique_colors[:, 2]
+#    return histograms
 
-    fig = plt.figure(figsize=(10, 8))
+def plot_3d_histogram(counts, bins):
+    fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
-    ax.bar3d(r_values, g_values, b_values, 1, 1, counts, shade=True)
+    # Extract bin edges
+    x_edges, y_edges, z_edges = bins
+
+    # Create grid
+    x_data, y_data, z_data = np.meshgrid(x_edges[:-1], y_edges[:-1], z_edges[:-1], indexing='ij')
+
+    # Flatten counts and coordinates
+    flat_counts = counts.flatten()
+    flat_x = x_data.flatten()
+    flat_y = y_data.flatten()
+    flat_z = z_data.flatten()
+
+    # Reshape arrays to have the same size
+    size = min(flat_counts.size, flat_x.size, flat_y.size, flat_z.size)
+    flat_counts = flat_counts[:size]
+    flat_x = flat_x[:size]
+    flat_y = flat_y[:size]
+    flat_z = flat_z[:size]
+
+    # Plot 3D histogram
+    ax.bar3d(flat_x, flat_y, flat_z, dx=1, dy=1, dz=flat_counts, zsort='average')
 
     ax.set_xlabel('Red Channel')
     ax.set_ylabel('Green Channel')
     ax.set_zlabel('Blue Channel')
-    ax.set_title('3D Color Histogram')
+    ax.set_title('3D Histogram')
 
     plt.show()
 
@@ -126,7 +159,12 @@ if __name__ == "__main__":
     threshold = 100
 
     counts, bins = calculate_histogram(image, args.dims, args.ranges)
+    remaining_bins = partial_decomposition(counts, bins, threshold)
 
-    partial_reduction(counts, bins, threshold)
+    print(f"Remaining bins after partial decomposition:\n{remaining_bins}")
 
-    plot_3d_color_histogram(image)
+    # Partial reduction
+    reduced_counts, reduced_bins = partial_reduction(image, args.reduction_type)
+
+    # Plot 3D histogram for partial reduction
+    plot_3d_histogram(reduced_counts, reduced_bins)
