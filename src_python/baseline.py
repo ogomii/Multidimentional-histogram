@@ -10,7 +10,7 @@ def parseArguments():
     parser.add_argument('--image', help='image path', required=True)
     parser.add_argument('--reduction_type', help='partial reduction type (columns or rows)', required=True)
     parser.add_argument('--dims', help='bins for each dimension', nargs='+', required=False, default=None)
-    parser.add_argument('--ranges', help='bin ranges', nargs='+', required=False, default=None)
+    parser.add_argument('--seq', help='bins sequence', nargs='+', required=False, default=None)
     return parser.parse_args()
 
 def getImage(imagePath):
@@ -38,38 +38,33 @@ def list_all_colors(image):
     unique_colors = np.unique(image.reshape(-1, image.shape[2]), axis=0)
     print(f"List of all unique colors in the image:\n{unique_colors}")
 
-def calculate_histogram(data, dims, ranges):
+def calculateHistogramBasedOnBinsDimentaion(pixels, dims, verbose=True):
+    counts, bins = np.histogramdd(pixels, bins = [int(i) for i in dims])
+    if verbose:
+        print(f"histogram bin ranges:\n{bins[0]}\n{bins[1]}\n{bins[2]}")
+        print(f"histogram output counts shape: {counts.shape}")
+        print(f"counts of values in bins:\n{counts}")
+    return counts, bins
+
+def calculateHistogramBasedOnSequence(pixels, sequence, dimenstionality, verbose=True):
+    binSequences = [[float(i) for i in sequence] for _ in range(dimenstionality)]
+    counts, bins = np.histogramdd(pixels, bins = binSequences)
+    if verbose:
+        print(f"histogram bin ranges:\n{bins[0]}\n{bins[1]}\n{bins[2]}")
+        print(f"histogram output counts shape: {counts.shape}")
+        print(f"counts of values in bins:\n{counts}")
+    return counts, bins
+
+def calculate_histogram(data, dims=None, sequence=None):
     pixels = data.reshape(-1, data.shape[-1])
 
     if dims is not None:
-        # Use specified dimensions
-        bins = tuple([dims[i] for i in range(min(len(dims), pixels.shape[-1]))])
+        counts, bins = calculateHistogramBasedOnBinsDimentaion(pixels, dims)
+    elif sequence is not None:
+        counts, bins = calculateHistogramBasedOnSequence(pixels, sequence, pixels.shape[1])
     else:
-        # Automatically determine dimensions
-        if ranges is not None:
-            bins = tuple([
-                len(ranges[i]) - 1 if isinstance(ranges[i][0], (int, np.integer, float, np.floating)) else 256
-                for i in range(len(ranges))
-            ])
-        else:
-            bins = 16 # Default value
-
-    # Ensure that ranges are of the same type for all dimensions
-    if ranges is not None:
-        ranges = tuple([
-            (float(dim_range[0]), float(dim_range[1])) if isinstance(dim_range[0], (int, np.integer, float, np.floating))
-            else dim_range
-            for dim_range in ranges
-        ])
-
-    # Convert bins to a list of integers if it is a tuple containing integers and strings
-    if isinstance(bins, tuple):
-        bins = list(bins)
-        for i in range(len(bins)):
-            if isinstance(bins[i], str):
-                bins[i] = int(bins[i])
-
-    counts, bins = np.histogramdd(pixels, bins=bins, range=ranges)
+        print("Bins unspecified!")
+        exit()
 
     return counts, bins
 
@@ -97,38 +92,39 @@ def partial_decomposition(counts, bins, threshold):
 
     return remaining_bins
 
-def partial_reduction(image, axis, dims, ranges):
+def saveHistFromArray(array, fileName, hisogramIndex):
+    with open(fileName, 'w') as outfile:
+        for slice_2d in array[hisogramIndex]:
+            np.savetxt(outfile, slice_2d)
+    print(f"partial reduction histogram with index {hisogramIndex} saved to file {fileName}")
+
+def rowBasedPartialReduction(image, bins):
+    counts = []
+    for row in image:
+        row_counts, _ = calculateHistogramBasedOnSequence(row, bins[0], image.shape[2], verbose=False)
+        counts.append(row_counts)
+    counts = np.array(counts)
+    saveHistFromArray(counts, "rowBasedPatialReduction.txt", 0)
+    return counts
+
+def columnBasedPartialReduction(image, bins):
+    counts = []
+    for i in range(image.shape[1]):  # Iterate over columns
+        col_counts, _ = calculateHistogramBasedOnSequence(image[:, i], bins[0], image.shape[2], verbose=False)  # Use image[:, i] instead of image[:, 0]
+        counts.append(col_counts)
+    counts = np.array(counts)
+    saveHistFromArray(counts, "columnsBasedPatialReduction.txt", 0)
+    return counts
+
+def partial_reduction(image, axis, bins):
     if axis == 'rows':
-        # Perform partial reduction on rows
-        counts = []
-        for row in image:
-            row_counts, _ = calculate_histogram(row, dims, ranges)
-            counts.append(row_counts)
-        counts = np.array(counts)
-
-        # Aggregate counts along the specified axis (rows)
-        counts = np.sum(counts, axis=0)
-
-        # Extract bin edges for plotting
-        _, bins = calculate_histogram(image[0], dims, ranges)
-
+        counts = rowBasedPartialReduction(image, bins)
     elif axis == 'columns':
-        # Perform partial reduction on columns
-        counts = []
-        for i in range(image.shape[1]):  # Iterate over columns
-            col_counts, _ = calculate_histogram(image[:, i], dims, ranges)  # Use image[:, i] instead of image[:, 0]
-            counts.append(col_counts)
-        counts = np.array(counts)
-
-        # Aggregate counts along the specified axis (columns)
-        counts = np.sum(counts, axis=0)
-
-        # Extract bin edges for plotting
-        _, bins = calculate_histogram(image[:, 0], dims, ranges)  # Use image[:, 0] for bins
-
+        counts = columnBasedPartialReduction(image, bins)
     else:
         raise ValueError("Invalid axis. Use 'rows' or 'columns'.")
 
+    print(f"Partial reduction counts shape: {counts.shape}")
     return counts, bins
 
 def plot_3d_histogram(counts, bins):
@@ -156,12 +152,14 @@ if __name__ == "__main__":
         printExampleRGBValues(image)
     list_all_colors(image)
 
-    threshold = 100
 
-    counts, bins = partial_reduction(image, axis=args.reduction_type, dims=args.dims, ranges=args.ranges)
-    remaining_bins = partial_decomposition(counts, bins, threshold)
+    hist_counts, hist_bins = calculate_histogram(image, args.dims, args.seq)
+    reduction_counts, reduction_bins = partial_reduction(image, axis=args.reduction_type, bins=hist_bins)
+
+    threshold = 100
+    remaining_bins = partial_decomposition(reduction_counts, reduction_bins, threshold)
 
     print(f"Remaining bins after partial decomposition:\n{remaining_bins}")
 
-    # Plot 3D histogram for partial reduction
-    plot_3d_histogram(counts, bins)
+    # Plot 3D histogram for histogram
+    plot_3d_histogram(hist_counts, hist_bins)
