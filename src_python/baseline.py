@@ -5,6 +5,21 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
+
+def histogram(sample, bins):
+    N, D = sample.shape
+    binsShape = [len(bin)-1 for bin in bins]
+    counts = np.zeros(binsShape)
+    for pixel in sample:
+        binAffiliation = [binsShape[_]-1 for _ in range(D)]
+        for colorIndex in range(D):
+            for edgeIndex in range(binsShape[colorIndex]):
+                if pixel[colorIndex] < bins[colorIndex][edgeIndex+1]:
+                    binAffiliation[colorIndex] = edgeIndex
+                    break
+        counts[tuple(binAffiliation)] += 1
+    return counts, bins
+
 def parseArguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--image', help='image path', required=True)
@@ -38,8 +53,19 @@ def list_all_colors(image):
     unique_colors = np.unique(image.reshape(-1, image.shape[2]), axis=0)
     print(f"List of all unique colors in the image:\n{unique_colors}")
 
+def getBinSequenceFromDimension(dims):
+    dimenstions = [int(i) for i in dims]
+    bins = [[0] for _ in range(len(dimenstions))]
+    for dimIndex in range(len(dimenstions)):
+        edge = 0
+        for dim in range(dimenstions[dimIndex]):
+            edge += 255/dimenstions[dimIndex]
+            bins[dimIndex].append(edge)
+    return bins
+
 def calculateHistogramBasedOnBinsDimentaion(pixels, dims, verbose=True):
-    counts, bins = np.histogramdd(pixels, bins = [int(i) for i in dims])
+    bins = getBinSequenceFromDimension(dims)
+    counts, bins = histogram(pixels, bins = bins)
     if verbose:
         print(f"histogram bin ranges:\n{bins[0]}\n{bins[1]}\n{bins[2]}")
         print(f"histogram output counts shape: {counts.shape}")
@@ -101,7 +127,7 @@ def saveHistFromArray(array, fileName, hisogramIndex):
 def rowBasedPartialReduction(image, bins):
     counts = []
     for row in image:
-        row_counts, _ = calculateHistogramBasedOnSequence(row, bins[0], image.shape[2], verbose=False)
+        row_counts, _ = histogram(row, bins)
         counts.append(row_counts)
     counts = np.array(counts)
     saveHistFromArray(counts, "rowBasedPatialReduction.txt", 0)
@@ -110,7 +136,7 @@ def rowBasedPartialReduction(image, bins):
 def columnBasedPartialReduction(image, bins):
     counts = []
     for i in range(image.shape[1]):  # Iterate over columns
-        col_counts, _ = calculateHistogramBasedOnSequence(image[:, i], bins[0], image.shape[2], verbose=False)  # Use image[:, i] instead of image[:, 0]
+        col_counts, _ = histogram(image[:, i], bins)  # Use image[:, i] instead of image[:, 0]
         counts.append(col_counts)
     counts = np.array(counts)
     saveHistFromArray(counts, "columnsBasedPatialReduction.txt", 0)
@@ -156,10 +182,9 @@ if __name__ == "__main__":
     hist_counts, hist_bins = calculate_histogram(image, args.dims, args.seq)
     reduction_counts, reduction_bins = partial_reduction(image, axis=args.reduction_type, bins=hist_bins)
 
-    threshold = 100
-    remaining_bins = partial_decomposition(reduction_counts, reduction_bins, threshold)
-
-    print(f"Remaining bins after partial decomposition:\n{remaining_bins}")
+    #threshold = 100
+    #remaining_bins = partial_decomposition(reduction_counts, reduction_bins, threshold)
+    #print(f"Remaining bins after partial decomposition:\n{remaining_bins}")
 
     # Plot 3D histogram for histogram
     plot_3d_histogram(hist_counts, hist_bins)
