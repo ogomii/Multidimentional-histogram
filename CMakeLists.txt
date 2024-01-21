@@ -1,12 +1,30 @@
-cmake_minimum_required(VERSION 3.12)
-project(my_module)
+cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
+project(histogramCuda LANGUAGES CXX CUDA)
 
-set(CMAKE_PREFIX_PATH /home/skili/.local/lib/python3.10/site-packages/pybind11)
+# Find OpenCV
+find_package(OpenCV REQUIRED)
 
-find_package(pybind11 REQUIRED)
+# Set source files
+set(SOURCE_FILES src_cpp/Interface.cu)
 
-# Ajouter le chemin vers le répertoire contenant le fichier d'en-tête généré
-include_directories(${CMAKE_PREFIX_PATH}/include)
+# Specify the executable target
+add_executable(histogramCuda ${SOURCE_FILES})
 
-pybind11_add_module(my_module src_cpp/Interface.cpp src_python/baseline.py)
+# Set the CUDA architecture (change it according to your GPU)
+set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-arch=sm_61)
+
+# Link OpenCV
+target_link_libraries(histogramCuda PRIVATE ${OpenCV_LIBS})
+
+# Specify the include directories for CUDA
+target_include_directories(histogramCuda PRIVATE ${OpenCV_INCLUDE_DIRS})
+
+# Set the runtime library to use (change it according to your GPU)
+set_property(TARGET histogramCuda PROPERTY CUDA_ARCHITECTURES 61)
+
+# Set compiler flags for C++14
+set_target_properties(histogramCuda PROPERTIES
+                      CXX_STANDARD 14
+                      CXX_STANDARD_REQUIRED YES
+                      CXX_EXTENSIONS NO)
 
