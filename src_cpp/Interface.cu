@@ -1,106 +1,101 @@
 #include <iostream>
 #include <vector>
-#include <numeric>
 #include <opencv2/opencv.hpp>
 
-// CUDA kernel to calculate histogram
-__global__ void histogramKernel(float* counts, const uchar3* image, const int* binsShape, const int width, const int height) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+// Kernel CUDA pour le calcul de l'histogramme
+__global__ void histogramKernel(const uchar* d_data, int width, int height, int channels,
+                                int* d_counts, const int* d_bins, int binsSize) {
+    int tid_x = threadIdx.x + blockIdx.x * blockDim.x;
+    int tid_y = threadIdx.y + blockIdx.y * blockDim.y;
 
-    if (x < width && y < height) {
-        // Calculate bin affiliation for each color channel
-        int binAffiliation[3];
-        binAffiliation[0] = static_cast<int>(image[y * width + x].x);
-        binAffiliation[1] = static_cast<int>(image[y * width + x].y);
-        binAffiliation[2] = static_cast<int>(image[y * width + x].z);
+    if (tid_x < width && tid_y < height) {
+        int index = tid_y * width * channels + tid_x * channels;
 
-        // Calculate the flat index for 3D histogram
-        int flatIndex = binAffiliation[2] * binsShape[1] * binsShape[0] + binAffiliation[1] * binsShape[0] + binAffiliation[0];
+        for (int c = 0; c < channels; ++c) {
+            int pixelValue = d_data[index + c];
+            int binIndex = binsSize - 1;
 
-        // Atomically increment the corresponding histogram bin
-        atomicAdd(&counts[flatIndex], 1.0f);
+            for (int i = 0; i < binsSize - 1; ++i) {
+                if (pixelValue < d_bins[c * binsSize + i + 1]) {
+                    binIndex = i;
+                    break;
+                }
+            }
+
+            atomicAdd(&d_counts[c * binsSize * binsSize + binIndex * binsSize + c], 1);
+        }
     }
 }
 
-// Function to calculate histogram from an image
-std::vector<float> histogram(const cv::Mat& image, const std::vector<int>& binsShape) {
-    const int width = image.cols;
-    const int height = image.rows;
+// Fonction pour calculer l'histogramme en couleur à l'aide de CUDA
+void calculateColorHistogram(const cv::Mat& image, const std::vector<std::vector<int>>& bins,
+                             std::vector<int>& counts) {
+    int width = image.cols;
+    int height = image.rows;
+    int channels = image.channels();
+    int binsSize = bins[0].size();
 
-    // Total number of bins in the histogram
-    const int totalBins = std::accumulate(binsShape.begin(), binsShape.end(), 1, std::multiplies<int>());
+    uchar* d_data;
+    int* d_counts;
+    int* d_bins;
 
-    // Allocate device memory for histogram counts
-    float* d_counts;
-    cudaMalloc((void**)&d_counts, totalBins * sizeof(float));
-    cudaMemset(d_counts, 0, totalBins * sizeof(float));
+    // Allouer de la mémoire sur le GPU
+    cudaMalloc((void**)&d_data, width * height * channels * sizeof(uchar));
+    cudaMalloc((void**)&d_counts, channels * binsSize * binsSize * sizeof(int));
+    cudaMalloc((void**)&d_bins, channels * binsSize * sizeof(int));
 
-    // Copy image data to device
-    uchar3* d_image;
-    cudaMalloc((void**)&d_image, width * height * sizeof(uchar3));
-    cudaMemcpy(d_image, image.ptr(), width * height * sizeof(uchar3), cudaMemcpyHostToDevice);
+    // Copier les données sur le GPU
+    cudaMemcpy(d_data, image.data, width * height * channels * sizeof(uchar), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_bins, bins.data(), channels * binsSize * sizeof(int), cudaMemcpyHostToDevice);
 
-    // Copy binsShape to device
-    int* d_binsShape;
-    cudaMalloc((void**)&d_binsShape, binsShape.size() * sizeof(int));
-    cudaMemcpy(d_binsShape, binsShape.data(), binsShape.size() * sizeof(int), cudaMemcpyHostToDevice);
+    // Définir la grille et les blocs pour l'exécution du kernel CUDA
+    dim3 threadsPerBlock(16, 16);
+    dim3 numBlocks((width + threadsPerBlock.x - 1) / threadsPerBlock.x,
+                   (height + threadsPerBlock.y - 1) / threadsPerBlock.y);
 
-    // Define CUDA thread and block dimensions
-    const dim3 blockSize(16, 16);
-    const dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
+    // Appeler le kernel CUDA
+    histogramKernel<<<numBlocks, threadsPerBlock>>>(d_data, width, height, channels, d_counts, d_bins, binsSize);
 
-    // Launch CUDA kernel to calculate histogram
-    histogramKernel<<<gridSize, blockSize>>>(d_counts, d_image, d_binsShape, width, height);
+    // Copier les résultats du GPU vers le CPU
+    cudaMemcpy(counts.data(), d_counts, channels * binsSize * binsSize * sizeof(int), cudaMemcpyDeviceToHost);
 
-    // Copy histogram counts back to host
-    std::vector<float> counts(totalBins);
-    cudaMemcpy(counts.data(), d_counts, totalBins * sizeof(float), cudaMemcpyDeviceToHost);
-
-    // Free device memory
+    // Libérer la mémoire sur le GPU
+    cudaFree(d_data);
     cudaFree(d_counts);
-    cudaFree(d_image);
-    cudaFree(d_binsShape);
-
-    return counts;
+    cudaFree(d_bins);
 }
 
 int main(int argc, char** argv) {
     if (argc != 2) {
-        std::cerr << "Usage: " << argv[0] << " <image_path>\n";
+        std::cerr << "Usage: " << argv[0] << " <image_path>" << std::endl;
         return -1;
     }
 
-    // Load the image from the specified path in command line arguments
+    // Charger l'image en couleur (3 canaux)
     cv::Mat image = cv::imread(argv[1]);
+
     if (image.empty()) {
-        std::cerr << "Could not open or find the image.\n";
+        std::cerr << "Error: Could not read the image." << std::endl;
         return -1;
     }
 
-    // Print image information
-    std::cout << "Image size: " << image.cols << " x " << image.rows << std::endl;
+    // Définir les bins
+    std::vector<std::vector<int>> bins = {{0, 125, 255}, {0, 125, 255}, {0, 125, 255}};
 
-    // Convert the image to uchar3 format
-    cv::Mat3b bgrImage = image;
-    std::vector<uchar3> uchar3Image;
-    for (int y = 0; y < image.rows; ++y) {
-        for (int x = 0; x < image.cols; ++x) {
-            cv::Vec3b pixel = bgrImage(y, x);
-            uchar3Image.push_back(uchar3{pixel[0], pixel[1], pixel[2]});
-        }
-    }
+    // Initialiser le vecteur de counts avec des zéros
+    std::vector<int> counts(bins[0].size() * bins[0].size() * bins[0].size(), 0);
 
-    // Define histogram parameters (reduce the number of bins)
-    std::vector<int> binsShape = {64, 64, 64};  // Adjust as needed
+    // Calculer l'histogramme en couleur à l'aide de CUDA
+    calculateColorHistogram(image, bins, counts);
 
-    // Calculate the histogram
-    std::vector<float> counts = histogram(image, binsShape);
-
-    // Display the results
-    for (int i = 0; i < counts.size(); ++i) {
-        if (counts[i] > 0) {
-            std::cout << "Bin " << i << ": " << counts[i] << std::endl;
+    // Afficher les résultats
+    std::cout << "Color Histogram Counts:" << std::endl;
+    for (int i = 0; i < bins[0].size(); ++i) {
+        for (int j = 0; j < bins[0].size(); ++j) {
+            for (int k = 0; k < bins[0].size(); ++k) {
+                std::cout << counts[i * bins[0].size() * bins[0].size() + j * bins[0].size() + k] << " ";
+            }
+            std::cout << std::endl;
         }
     }
 
