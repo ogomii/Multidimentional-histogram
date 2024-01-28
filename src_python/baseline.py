@@ -26,6 +26,7 @@ def parseArguments():
     parser.add_argument('--reduction_type', help='partial reduction type (columns or rows)', required=True)
     parser.add_argument('--dims', help='bins for each dimension', nargs='+', required=False, default=None)
     parser.add_argument('--seq', help='bins sequence', nargs='+', required=False, default=None)
+    parser.add_argument('--save', help='save counts to file', required=False, action='store_true')
     return parser.parse_args()
 
 def getImage(imagePath):
@@ -169,6 +170,12 @@ def plot_3d_histogram(counts, bins):
 
     plt.show()
 
+def saveCountsToFile(hist_counts):
+    with open("pythonCounts.txt", "w") as txt_file:
+        hist_counts_flattened = hist_counts.flatten('C')
+        for count in hist_counts_flattened:
+            txt_file.write(str(int(count)) + "\n")
+
 if __name__ == "__main__":
     args = parseArguments()
 
@@ -180,6 +187,8 @@ if __name__ == "__main__":
 
 
     hist_counts, hist_bins = calculate_histogram(image, args.dims, args.seq)
+    if(args.save):
+        saveCountsToFile(hist_counts)
     reduction_counts, reduction_bins = partial_reduction(image, axis=args.reduction_type, bins=hist_bins)
 
     #threshold = 100

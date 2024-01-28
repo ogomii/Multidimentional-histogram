@@ -1,6 +1,8 @@
 #include <iostream>
 #include <vector>
 #include <cmath>
+#include <chrono>
+#include <fstream>
 #include <cuda_runtime.h>
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -48,11 +50,16 @@ void calculateHistogram(const uchar3* hostImage, int width, int height, const fl
     cudaMemcpy(deviceImage, hostImage, width * height * sizeof(uchar3), cudaMemcpyHostToDevice);
     cudaMemcpy(deviceBins, hostBins, 3 * binSize * sizeof(float), cudaMemcpyHostToDevice);
 
-    dim3 blockDim(16, 16);
+    dim3 blockDim(8,8);
     dim3 gridDim((width + blockDim.x - 1) / blockDim.x, (height + blockDim.y - 1) / blockDim.y);
 
+    auto start = std::chrono::high_resolution_clock::now();
     histogramKernel<<<gridDim, blockDim>>>(deviceImage, width, height, deviceBins, deviceCounts, (binSize-1));
     cudaDeviceSynchronize();
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+    std::cout << "Time taken by function: " << duration.count() << " microseconds" << std::endl;
+
     cudaMemcpy(hostCounts, deviceCounts, getCountsSize(binSize) * sizeof(int), cudaMemcpyDeviceToHost);
 
     cudaFree(deviceImage);
@@ -98,6 +105,15 @@ int main(int argc, char** argv) {
         if ((i + 1) % (binSize-1) == 0) {
             std::cout << std::endl;
         }
+    }
+
+    std::ofstream myfile ("cudaCounts.txt");
+    if (myfile.is_open())
+    {
+        for (int i = 0; i < getCountsSize(binSize); ++i) {
+            myfile << counts[i] << "\n";
+        }
+        myfile.close();
     }
 
     delete[] image;
