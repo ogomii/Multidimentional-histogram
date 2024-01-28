@@ -1,53 +1,59 @@
 #include <iostream>
 #include <vector>
+#include <cmath>
 #include <cuda_runtime.h>
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
-__device__ int getBinIndex(int value, const int* bins, int binSize) {
-    for (int i = 0; i < binSize - 1; ++i) {
-        if (value < bins[i * 3 + 1]) {
+constexpr int getCountsSize(int binSize)
+{
+    return std::pow(binSize-1,3);
+}
+
+__device__ int getBinIndex(int value, const float* bins, int binCountPerDim) {
+    for (int i = 0; i < binCountPerDim; ++i) {
+        if (value < bins[i + 1]) {
             return i;
         }
     }
-    return binSize - 1;
+    return binCountPerDim-1;
 }
 
-__global__ void histogramKernel(const uchar3* inputImage, int width, int height, const int* bins, int* counts, int binSize) {
+__global__ void histogramKernel(const uchar3* inputImage, int width, int height, const float* bins, int* counts, int binCountPerDim) {
     int tidX = blockIdx.x * blockDim.x + threadIdx.x;
     int tidY = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (tidX < width && tidY < height) {
         uchar3 pixel = inputImage[tidY * width + tidX];
 
-        int binIndexR = getBinIndex(pixel.x, bins, binSize);
-        int binIndexG = getBinIndex(pixel.y, bins, binSize);
-        int binIndexB = getBinIndex(pixel.z, bins, binSize);
+        int binIndexR = getBinIndex(pixel.x, &bins[0*(binCountPerDim+1)], binCountPerDim);
+        int binIndexG = getBinIndex(pixel.y, &bins[1*(binCountPerDim+1)], binCountPerDim);
+        int binIndexB = getBinIndex(pixel.z, &bins[2*(binCountPerDim+1)], binCountPerDim);
 
-        int countsIndex = binIndexR * binSize * binSize + binIndexG * binSize + binIndexB;
+        int countsIndex = binIndexR * binCountPerDim * binCountPerDim + binIndexG * binCountPerDim + binIndexB;
         int pixelIndex = tidY * width + tidX;
         atomicAdd(&counts[countsIndex], (pixelIndex < width * height) ? 1 : 0);
     }
 }
 
-void calculateHistogram(const uchar3* hostImage, int width, int height, const int* hostBins, int* hostCounts, int binSize) {
+void calculateHistogram(const uchar3* hostImage, int width, int height, const float* hostBins, int* hostCounts, int binSize) {
     uchar3* deviceImage;
-    int* deviceBins;
+    float* deviceBins;
     int* deviceCounts;
 
     cudaMalloc(&deviceImage, width * height * sizeof(uchar3));
-    cudaMalloc(&deviceBins, 3 * binSize * sizeof(int));
-    cudaMalloc(&deviceCounts, binSize * binSize * binSize * sizeof(int));
+    cudaMalloc(&deviceBins, 3 * binSize * sizeof(float));
+    cudaMalloc(&deviceCounts, getCountsSize(binSize) * sizeof(int));
 
     cudaMemcpy(deviceImage, hostImage, width * height * sizeof(uchar3), cudaMemcpyHostToDevice);
-    cudaMemcpy(deviceBins, hostBins, 3 * binSize * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(deviceBins, hostBins, 3 * binSize * sizeof(float), cudaMemcpyHostToDevice);
 
     dim3 blockDim(16, 16);
     dim3 gridDim((width + blockDim.x - 1) / blockDim.x, (height + blockDim.y - 1) / blockDim.y);
 
-    histogramKernel<<<gridDim, blockDim>>>(deviceImage, width, height, deviceBins, deviceCounts, binSize);
-
-    cudaMemcpy(hostCounts, deviceCounts, binSize * binSize * binSize * sizeof(int), cudaMemcpyDeviceToHost);
+    histogramKernel<<<gridDim, blockDim>>>(deviceImage, width, height, deviceBins, deviceCounts, (binSize-1));
+    cudaDeviceSynchronize();
+    cudaMemcpy(hostCounts, deviceCounts, getCountsSize(binSize) * sizeof(int), cudaMemcpyDeviceToHost);
 
     cudaFree(deviceImage);
     cudaFree(deviceBins);
@@ -72,8 +78,8 @@ int main(int argc, char** argv) {
     const int height = inputImage.rows;
 
     uchar3* image = new uchar3[width * height];
-    int* bins = new int[3 * binSize];
-    int* counts = new int[binSize * binSize * binSize];
+    float bins[3 * binSize] = {0, 99.5, 255, 0, 99.5, 255, 0, 99.5, 255};
+    int* counts = new int[getCountsSize(binSize)];
 
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
@@ -84,24 +90,17 @@ int main(int argc, char** argv) {
         }
     }
 
-    for (int i = 0; i < binSize; ++i) {
-        bins[i * 3 + 0] = 0;
-        bins[i * 3 + 1] = 125;
-        bins[i * 3 + 2] = 255;
-    }
-
     calculateHistogram(image, width, height, bins, counts, binSize);
 
     std::cout << "Histogram Counts:" << std::endl;
-    for (int i = 0; i < binSize * binSize * binSize; ++i) {
+    for (int i = 0; i < getCountsSize(binSize); ++i) {
         std::cout << counts[i] << " ";
-        if ((i + 1) % binSize == 0) {
+        if ((i + 1) % (binSize-1) == 0) {
             std::cout << std::endl;
         }
     }
 
     delete[] image;
-    delete[] bins;
     delete[] counts;
 
     return 0;
