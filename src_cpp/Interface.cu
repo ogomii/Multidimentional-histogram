@@ -162,9 +162,9 @@ int main(int argc, char** argv) {
             cv::Vec3b pixel = inputImage.at<cv::Vec3b>(y, x);
 
             // Assuming 1d array for image representation
-            image[y * metadata.width * metadata.dim + x * metadata.dim + 0] = pixel[2];
-            image[y * metadata.width * metadata.dim + x * metadata.dim + 1] = pixel[1];
-            image[y * metadata.width * metadata.dim + x * metadata.dim + 2] = pixel[0];
+            image[y * metadata.width * metadata.dim + x * metadata.dim + 0] = static_cast<inputDataType>(pixel[2]);
+            image[y * metadata.width * metadata.dim + x * metadata.dim + 1] = static_cast<inputDataType>(pixel[1]);
+            image[y * metadata.width * metadata.dim + x * metadata.dim + 2] = static_cast<inputDataType>(pixel[0]);
         }
     }
 
