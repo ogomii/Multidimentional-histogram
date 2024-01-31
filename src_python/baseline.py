@@ -131,6 +131,7 @@ def rowBasedPartialReduction(image, bins):
         row_counts, _ = histogram(row, bins)
         counts.append(row_counts)
     counts = np.array(counts)
+    print(f"Partial reduction counts shape: {counts.shape}")
     saveHistFromArray(counts, "rowBasedPatialReduction.txt", 0)
     return counts
 
@@ -140,6 +141,7 @@ def columnBasedPartialReduction(image, bins):
         col_counts, _ = histogram(image[:, i], bins)  # Use image[:, i] instead of image[:, 0]
         counts.append(col_counts)
     counts = np.array(counts)
+    print(f"Partial reduction counts shape: {counts.shape}")
     saveHistFromArray(counts, "columnsBasedPatialReduction.txt", 0)
     return counts
 
